@@ -11,6 +11,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// GetUsernsFD returns a userns file descriptor.
+//
+// NOTE: It forks a short-live process without CLONE_FILES, which the process
+// might hold the copied file descriptors in a short time.
 func GetUsernsFD() (*os.File, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -26,6 +30,7 @@ func GetUsernsFD() (*os.File, error) {
 		syscall.Close(pipeFds[1])
 		return nil, fmt.Errorf("failed to unshare userns: %w", errno)
 	}
+
 	defer func() {
 		_, err := unix.Wait4(int(pid), nil, 0, nil)
 		for err == syscall.EINTR {
@@ -37,39 +42,33 @@ func GetUsernsFD() (*os.File, error) {
 		}
 	}()
 
-	if err := syscall.Close(pipeFds[1]); err != nil {
-		syscall.Close(pipeFds[0])
-		return nil, fmt.Errorf("failed to close pipe2(writer): %w", err)
-	}
+	syscall.Close(pipeFds[0])
 
 	f, err := os.Open(fmt.Sprintf("/proc/%d/ns/user", pid))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open userns fd: %w", err)
 	}
 
-	buf := make([]byte, 1)
-	_, err = syscall.Read(pipeFds[0], buf)
-	syscall.Close(pipeFds[0])
-
+	// NOTE: Ensure that pid isn't recycled.
+	ready := []byte{1}
+	_, err = syscall.Write(pipeFds[1], ready)
+	syscall.Close(pipeFds[1])
 	if err != nil {
+		f.Close()
 		return nil, fmt.Errorf("failed to read ready notify: %w", err)
 	}
 	return f, nil
 }
 
 func unshareUserns(pipeFds [2]int) (pid uintptr, errno syscall.Errno) {
-	var ready byte = 1
+	var ready uintptr
 
 	// block signal during clone
 	beforeFork()
 
-	pid, _, errno = syscall.RawSyscall6(syscall.SYS_CLONE,
-		uintptr(syscall.SIGCHLD)|syscall.CLONE_NEWUSER|syscall.CLONE_FILES,
-		0,
-		0,
-		0,
-		0,
-		0,
+	pid, _, errno = syscall.RawSyscall(syscall.SYS_CLONE,
+		uintptr(syscall.SIGCHLD)|syscall.CLONE_NEWUSER,
+		0, 0,
 	)
 	if errno != 0 || pid != 0 {
 		// restore all signals
@@ -80,9 +79,13 @@ func unshareUserns(pipeFds [2]int) (pid uintptr, errno syscall.Errno) {
 	// restore all signals
 	afterForkInChild()
 
-	// TODO(fuweid): limit the buffer
-	_, _, errno = syscall.RawSyscall(syscall.SYS_WRITE,
-		uintptr(pipeFds[1]), uintptr(unsafe.Pointer(&ready)), unsafe.Sizeof(ready))
+	_, _, errno = syscall.RawSyscall(syscall.SYS_CLOSE, uintptr(pipeFds[1]), 0, 0)
+	if errno != 0 {
+		goto childerr
+	}
+
+	_, _, errno = syscall.RawSyscall(syscall.SYS_READ,
+		uintptr(pipeFds[0]), uintptr(unsafe.Pointer(&ready)), unsafe.Sizeof(ready))
 	if errno != 0 {
 		goto childerr
 	}
