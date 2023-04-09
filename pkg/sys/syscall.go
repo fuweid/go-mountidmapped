@@ -24,20 +24,35 @@ var _zero uintptr
 
 // Fsconfig is to call SYS_FSCONFIG syscall.
 //
-// NOTE: It's copied from https://go-review.googlesource.com/c/sys/+/398434.
-func Fsconfig(fd *int, cmd int, key string, value []byte, aux int) (err error) {
-	var _p0 *byte
-	_p0, err = unix.BytePtrFromString(key)
-	if err != nil {
-		return
+// NOTE: It's based on https://go-review.googlesource.com/c/sys/+/398434.
+func Fsconfig(fd int, cmd int, key string, value string, aux int) (err error) {
+	var _p0 unsafe.Pointer
+	if len(key) > 0 {
+		var _v0 *byte
+		_v0, err = unix.BytePtrFromString(key)
+		if err != nil {
+			return
+		}
+		_p0 = unsafe.Pointer(_v0)
+	} else {
+		_p0 = nil
 	}
+
 	var _p1 unsafe.Pointer
 	if len(value) > 0 {
-		_p1 = unsafe.Pointer(&value[0])
+		var _v0 *byte
+		_v0, err = unix.BytePtrFromString(value)
+		if err != nil {
+			return err
+		}
+		_p1 = unsafe.Pointer(_v0)
+	} else if cmd == FSCONFIG_CMD_CREATE {
+		_p1 = nil
 	} else {
 		_p1 = unsafe.Pointer(&_zero)
 	}
-	_, _, e1 := unix.Syscall6(unix.SYS_FSCONFIG, uintptr(unsafe.Pointer(fd)), uintptr(cmd), uintptr(unsafe.Pointer(_p0)), uintptr(_p1), uintptr(len(value)), uintptr(aux))
+
+	_, _, e1 := unix.Syscall6(unix.SYS_FSCONFIG, uintptr(fd), uintptr(cmd), uintptr(_p0), uintptr(_p1), uintptr(aux), 0)
 	if e1 != 0 {
 		err = e1
 	}
