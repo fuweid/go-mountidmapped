@@ -26,7 +26,7 @@ func init() {
 	flag.StringVar(&lowerDirs, "lowerDirs", "", "[Required] The lowerdir(<dir>[:<dir>]) of overlayfs")
 	flag.StringVar(&mergedDir, "mergedDir", "", "[Required] The merged point of overlayfs")
 	flag.StringVar(&upperDir, "upperDir", "", "The upperdir of overlayfs")
-	flag.StringVar(&workDir, "workDir", "", "The upperdir of overlayfs")
+	flag.StringVar(&workDir, "workDir", "", "The workdir of overlayfs")
 	flag.StringVar(&idmapping, "idmapping", "", "[Required] The idmapping(<id-from>:<id-to>:<id-range>) of both uid and gid")
 }
 
