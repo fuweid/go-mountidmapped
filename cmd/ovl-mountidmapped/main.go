@@ -66,6 +66,7 @@ func main() {
 	// cleanup
 	doneFn()
 	usernsFD.Close()
+	os.RemoveAll(tempDir)
 
 	if err != nil {
 		log.Fatalf("failed to make overlay mount on %s: %v", mergedDir, err)
