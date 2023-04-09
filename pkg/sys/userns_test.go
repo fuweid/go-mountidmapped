@@ -3,12 +3,14 @@ package sys
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 var initUsernsFD uint64
@@ -79,6 +81,77 @@ func TestGetUsernsFDConcurrent(t *testing.T) {
 		require.Equal(t, false, ok, "should not have duplicate userns ID")
 		require.NotEqual(t, initUsernsFD, usernsID)
 		noDupUserns[usernsID] = struct{}{}
+	}
+}
+
+func TestIDMapMount(t *testing.T) {
+	dirUid0 := buildTempdir(t,
+		fileApplier{name: "foo", content: []byte("bar")},
+		fileApplier{name: "fuzz", content: []byte("oops")},
+	)
+	dirUid1000 := buildTempdir(t) // empty
+
+	f, err := GetUsernsFD([]ProcIDMap{{0, 1000, 1}}, []ProcIDMap{{0, 1000, 1}})
+	require.NoError(t, err)
+	defer f.Close()
+
+	fdTree, err := IDMapMount(dirUid0, f.Fd())
+	require.NoError(t, err)
+
+	err = unix.MoveMount(fdTree, "", -int(unix.EBADF), dirUid1000, unix.MOVE_MOUNT_F_EMPTY_PATH)
+	syscall.Close(fdTree)
+	require.NoError(t, err)
+
+	t.Cleanup(func() { unmount(t, dirUid1000) })
+
+	{
+		fi, err := os.Stat(filepath.Join(dirUid1000, "foo"))
+		require.NoError(t, err)
+		require.Equal(t, uint32(1000), fi.Sys().(*syscall.Stat_t).Uid)
+		require.Equal(t, uint32(1000), fi.Sys().(*syscall.Stat_t).Gid)
+	}
+
+	{
+		fi, err := os.Stat(filepath.Join(dirUid1000, "fuzz"))
+		require.NoError(t, err)
+		require.Equal(t, uint32(1000), fi.Sys().(*syscall.Stat_t).Uid)
+		require.Equal(t, uint32(1000), fi.Sys().(*syscall.Stat_t).Gid)
+	}
+}
+
+func buildTempdir(t *testing.T, appliers ...fileApplier) string {
+	dir := t.TempDir()
+
+	for _, a := range appliers {
+		assert.NoError(t, a.Apply(dir, 0600))
+	}
+	return dir
+}
+
+type fileApplier struct {
+	name    string
+	content []byte
+}
+
+func (a fileApplier) Apply(rootDir string, perm os.FileMode) error {
+	return os.WriteFile(
+		filepath.Join(rootDir, a.name),
+		a.content,
+		perm,
+	)
+
+}
+
+func unmount(t *testing.T, dirPath string) {
+	for {
+		if err := unix.Unmount(dirPath, 0); err != nil {
+			if err == unix.EINVAL {
+				return
+			}
+
+			t.Fatalf("failed to unmount %s: %v", dirPath, err)
+			return
+		}
 	}
 }
 

@@ -1,6 +1,8 @@
 package sys
 
 import (
+	"fmt"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -20,6 +22,8 @@ var (
 // Single-word zero for use when we need a valid pointer to 0 bytes.
 var _zero uintptr
 
+// Fsconfig is to call SYS_FSCONFIG syscall.
+//
 // NOTE: It's copied from https://go-review.googlesource.com/c/sys/+/398434.
 func Fsconfig(fd *int, cmd int, key string, value []byte, aux int) (err error) {
 	var _p0 *byte
@@ -38,4 +42,38 @@ func Fsconfig(fd *int, cmd int, key string, value []byte, aux int) (err error) {
 		err = e1
 	}
 	return
+}
+
+// IDMapMount calls mount_setattr syscall with a given userns fd.
+func IDMapMount(dir string, usernsFD uintptr) (int, error) {
+	dirFD, err := openTree(dir, unix.OPEN_TREE_CLONE|unix.OPEN_TREE_CLOEXEC)
+	if err != nil {
+		return 0, fmt.Errorf("failed to sys_open_tree to %s: %w", dir, err)
+	}
+
+	attr := &unix.MountAttr{
+		Attr_set:  unix.MOUNT_ATTR_IDMAP,
+		Userns_fd: uint64(usernsFD),
+	}
+	if err := unix.MountSetattr(dirFD, "", unix.AT_EMPTY_PATH|unix.AT_RECURSIVE, attr); err != nil {
+		unix.Close(dirFD)
+		return 0, fmt.Errorf("failed to do idmap mount for %s: %w", dir, err)
+	}
+	return dirFD, nil
+}
+
+func openTree(path string, flags int) (fd int, err error) {
+	var _p0 *byte
+
+	if _p0, err = syscall.BytePtrFromString(path); err != nil {
+		return 0, err
+	}
+
+	r, _, e1 := unix.Syscall6(uintptr(unix.SYS_OPEN_TREE),
+		uintptr(0), uintptr(unsafe.Pointer(_p0)), uintptr(flags),
+		0, 0, 0)
+	if e1 != 0 {
+		err = e1
+	}
+	return int(r), nil
 }
