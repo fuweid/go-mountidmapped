@@ -9,8 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/fuweid/go-mountidmapped/pkg/sys"
-
+	"github.com/fuweid/go-mountidmapped"
 	"golang.org/x/sys/unix"
 )
 
@@ -40,9 +39,9 @@ func main() {
 	idMap, _ := parseIDMapping(idmapping)
 
 	// create userns
-	usernsFD, err := sys.GetUsernsFD(
-		[]sys.ProcIDMap{idMap},
-		[]sys.ProcIDMap{idMap},
+	usernsFD, err := mountidmapped.GetUsernsFD(
+		[]mountidmapped.ProcIDMap{idMap},
+		[]mountidmapped.ProcIDMap{idMap},
 	)
 	if err != nil {
 		log.Fatalf("failed to create new userns: %v", err)
@@ -79,29 +78,29 @@ func makeOvlFsMount(upperDir, workDir, lowerDirs, mergedDir string) error {
 		return fmt.Errorf("failed to fsopen overlay: %w", err)
 	}
 
-	err = sys.Fsconfig(overlayFD, sys.FSCONFIG_SET_STRING, "source", "overlay", 0)
+	err = mountidmapped.Fsconfig(overlayFD, mountidmapped.FSCONFIG_SET_STRING, "source", "overlay", 0)
 	if err != nil {
 		return fmt.Errorf("failed to fsconfig overlay source: %w", err)
 	}
 
-	err = sys.Fsconfig(overlayFD, sys.FSCONFIG_SET_STRING, "lowerdir", lowerDirs, 0)
+	err = mountidmapped.Fsconfig(overlayFD, mountidmapped.FSCONFIG_SET_STRING, "lowerdir", lowerDirs, 0)
 	if err != nil {
 		return fmt.Errorf("failed to fsconfig overlay lowerdir: %w", err)
 	}
 
 	if len(upperDir) != 0 {
-		err = sys.Fsconfig(overlayFD, sys.FSCONFIG_SET_STRING, "upperdir", upperDir, 0)
+		err = mountidmapped.Fsconfig(overlayFD, mountidmapped.FSCONFIG_SET_STRING, "upperdir", upperDir, 0)
 		if err != nil {
 			return fmt.Errorf("failed to fsconfig overlay upperDir: %w", err)
 		}
 
-		err = sys.Fsconfig(overlayFD, sys.FSCONFIG_SET_STRING, "workdir", workDir, 0)
+		err = mountidmapped.Fsconfig(overlayFD, mountidmapped.FSCONFIG_SET_STRING, "workdir", workDir, 0)
 		if err != nil {
 			return fmt.Errorf("failed to fsconfig overlay workDir: %w", err)
 		}
 	}
 
-	err = sys.Fsconfig(overlayFD, sys.FSCONFIG_CMD_CREATE, "", "", 0)
+	err = mountidmapped.Fsconfig(overlayFD, mountidmapped.FSCONFIG_CMD_CREATE, "", "", 0)
 	if err != nil {
 		return fmt.Errorf("failed to fsconfig to create overlay: %w", err)
 	}
@@ -142,7 +141,7 @@ func idmapMountLowerdirs(tempDir string, lowerDirs string, usernsFD *os.File) (_
 				return fmt.Errorf("failed to create new lowerDir %s: %w", newLowerDir, err)
 			}
 
-			fdTree, err := sys.IDMapMount(lowerDir, usernsFD.Fd())
+			fdTree, err := mountidmapped.IDMapMount(lowerDir, usernsFD.Fd())
 			if err != nil {
 				return fmt.Errorf("failed to idmap mount %s: %v", lowerDir, err)
 			}
@@ -183,9 +182,9 @@ func validateFlags() error {
 	return err
 }
 
-var emptyIDMap sys.ProcIDMap
+var emptyIDMap mountidmapped.ProcIDMap
 
-func parseIDMapping(mapping string) (sys.ProcIDMap, error) {
+func parseIDMapping(mapping string) (mountidmapped.ProcIDMap, error) {
 	parts := strings.SplitN(mapping, ":", 3)
 	if len(parts) != 3 {
 		return emptyIDMap, fmt.Errorf("expect <id-from>:<id-to>:<id-range>, but got %s", mapping)
@@ -206,7 +205,7 @@ func parseIDMapping(mapping string) (sys.ProcIDMap, error) {
 		return emptyIDMap, fmt.Errorf("failed to parse <id-range>(%s): %w", parts[2], err)
 	}
 
-	return sys.ProcIDMap{
+	return mountidmapped.ProcIDMap{
 		ContainerID: int(idFrom),
 		HostID:      int(idTo),
 		Size:        int(idRange),
