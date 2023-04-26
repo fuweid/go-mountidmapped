@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/fuweid/go-mountidmapped"
+
+	"github.com/containerd/containerd/mount"
 	"golang.org/x/sys/unix"
 )
 
@@ -73,49 +75,15 @@ func main() {
 }
 
 func makeOvlFsMount(upperDir, workDir, lowerDirs, mergedDir string) error {
-	overlayFD, err := unix.Fsopen("overlay", unix.FSOPEN_CLOEXEC)
-	if err != nil {
-		return fmt.Errorf("failed to fsopen overlay: %w", err)
-	}
-
-	err = mountidmapped.Fsconfig(overlayFD, mountidmapped.FSCONFIG_SET_STRING, "source", "overlay", 0)
-	if err != nil {
-		return fmt.Errorf("failed to fsconfig overlay source: %w", err)
-	}
-
-	err = mountidmapped.Fsconfig(overlayFD, mountidmapped.FSCONFIG_SET_STRING, "lowerdir", lowerDirs, 0)
-	if err != nil {
-		return fmt.Errorf("failed to fsconfig overlay lowerdir: %w", err)
-	}
-
-	if len(upperDir) != 0 {
-		err = mountidmapped.Fsconfig(overlayFD, mountidmapped.FSCONFIG_SET_STRING, "upperdir", upperDir, 0)
-		if err != nil {
-			return fmt.Errorf("failed to fsconfig overlay upperDir: %w", err)
-		}
-
-		err = mountidmapped.Fsconfig(overlayFD, mountidmapped.FSCONFIG_SET_STRING, "workdir", workDir, 0)
-		if err != nil {
-			return fmt.Errorf("failed to fsconfig overlay workDir: %w", err)
-		}
-	}
-
-	err = mountidmapped.Fsconfig(overlayFD, mountidmapped.FSCONFIG_CMD_CREATE, "", "", 0)
-	if err != nil {
-		return fmt.Errorf("failed to fsconfig to create overlay: %w", err)
-	}
-
-	mfd, err := unix.Fsmount(overlayFD, unix.FSMOUNT_CLOEXEC, 0)
-	if err != nil {
-		return fmt.Errorf("failed to fsmount: %w", err)
-	}
-	defer unix.Close(mfd)
-
-	err = unix.MoveMount(mfd, "", -int(unix.EBADF), mergedDir, unix.MOVE_MOUNT_F_EMPTY_PATH)
-	if err != nil {
-		return fmt.Errorf("failed to mount overlayfs on %s: %w", mergedDir, err)
-	}
-	return nil
+	return (&mount.Mount{
+		Type:   "overlay",
+		Source: "overlay",
+		Options: []string{
+			"workdir=" + workDir,
+			"upperdir=" + upperDir,
+			"lowerdir=" + lowerDirs,
+		},
+	}).Mount(mergedDir)
 }
 
 func idmapMountLowerdirs(tempDir string, lowerDirs string, usernsFD *os.File) (_ []string, cleanup func(), retErr error) {
