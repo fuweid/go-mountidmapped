@@ -33,11 +33,15 @@ func (idMaps ProcIDMaps) Marshal() []byte {
 // might hold the copied file descriptors in a short time.
 func GetUsernsFD(uidMaps, gidMaps []ProcIDMap) (_ *os.File, retErr error) {
 	var pipeFds [2]int
+
+	syscall.ForkLock.Lock()
 	if err := syscall.Pipe2(pipeFds[:], syscall.O_CLOEXEC); err != nil {
+		syscall.ForkLock.Unlock()
 		return nil, fmt.Errorf("failed to open pipe2: %w", err)
 	}
 
 	pid, errno := unshareUserns(pipeFds)
+	syscall.ForkLock.Unlock()
 	if errno != 0 {
 		syscall.Close(pipeFds[0])
 		syscall.Close(pipeFds[1])
